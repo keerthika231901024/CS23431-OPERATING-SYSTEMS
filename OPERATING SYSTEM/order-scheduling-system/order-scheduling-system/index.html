@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hotel Order Scheduler</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #f2f2f2; }
+    h1 { text-align: center; color: #333; }
+    form, .controls, .orders { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px #ccc; }
+    label { display: block; margin-top: 10px; }
+    input, select, button { width: 100%; padding: 10px; margin-top: 5px; font-size: 16px; }
+    canvas { margin-top: 30px; }
+    .order { margin: 10px 0; padding: 10px; border-left: 5px solid #007BFF; background: #f9f9f9; border-radius: 4px; }
+    .Pending { border-color: orange; }
+    .In\ Progress { border-color: dodgerblue; }
+    .Completed { border-color: seagreen; }
+  </style>
+</head>
+<body>
+  <h1>🍽️ Hotel Order Scheduler</h1>
+
+  <div class="controls">
+    <label>Scheduling Algorithm</label>
+    <select id="algorithm">
+      <option value="Priority">Priority</option>
+      <option value="FCFS">First-Come-First-Serve</option>
+      <option value="SJF">Shortest Job First</option>
+      <option value="Round Robin">Round Robin</option>
+    </select>
+    <label>Time Quantum (for Round Robin)</label>
+    <input type="number" id="quantum" value="5" />
+  </div>
+
+  <form id="orderForm">
+    <h2>Add New Order</h2>
+    <label>Customer Name</label>
+    <input type="text" id="customer_name" required />
+    <label>Dish Name</label>
+    <input type="text" id="dish_name" required />
+    <label>Prep Time (minutes)</label>
+    <input type="number" id="prep_time" required />
+    <label>Category</label>
+    <select id="category" required>
+      <option value="Breakfast">Breakfast</option>
+      <option value="Lunch">Lunch</option>
+      <option value="Dinner">Dinner</option>
+      <option value="Drinks">Drinks</option>
+    </select>
+    <label>Priority (1 = Highest)</label>
+    <input type="number" id="priority" required />
+    <button type="submit">➕ Add Order</button>
+  </form>
+
+  <div class="orders">
+    <h2>📋 Scheduled Orders</h2>
+    <div id="orderList"></div>
+    <canvas id="chartCanvas"></canvas>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const form = document.getElementById("orderForm");
+    const orderList = document.getElementById("orderList");
+    const chartCanvas = document.getElementById("chartCanvas").getContext("2d");
+    const algorithmSelect = document.getElementById("algorithm");
+    const quantumInput = document.getElementById("quantum");
+
+    let chart;
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = {
+        customer_name: document.getElementById("customer_name").value,
+        dish_name: document.getElementById("dish_name").value,
+        prep_time: document.getElementById("prep_time").value,
+        category: document.getElementById("category").value,
+        priority: document.getElementById("priority").value
+      };
+
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+
+        if (res.ok) {
+          form.reset();
+          fetchOrders();
+        } else {
+          alert("Failed to add order. Please try again.");
+        }
+      } catch (err) {
+        console.error("Error submitting order:", err);
+        alert("Could not connect to the server.");
+      }
+    });
+
+    algorithmSelect.addEventListener("change", fetchOrders);
+    quantumInput.addEventListener("input", fetchOrders);
+
+    async function fetchOrders() {
+      const algorithm = algorithmSelect.value;
+      const quantum = quantumInput.value || 5;
+
+      try {
+        const res = await fetch(`/api/orders?algorithm=${algorithm}&quantum=${quantum}`);
+        const data = await res.json();
+
+        const labels = [];
+        const durations = [];
+        const colors = [];
+        const tooltips = [];
+
+        orderList.innerHTML = "";
+        data.orders.forEach((order) => {
+          labels.push(`${order.dish_name} (${order.customer_name})`);
+          durations.push(order.prep_time);
+          tooltips.push(`${order.start_time} - ${order.end_time} | Priority ${order.priority}`);
+
+          const statusClass = order.status.replace(" ", "\\ ");
+          const color = order.status === "Completed" ? "seagreen" :
+                        order.status === "In Progress" ? "dodgerblue" : "orange";
+          colors.push(color);
+
+          const div = document.createElement("div");
+          div.className = `order ${statusClass}`;
+          div.innerHTML = `
+            <strong>${order.dish_name}</strong> (${order.category})<br>
+            ⏱️ ${order.prep_time} mins | Priority ${order.priority}<br>
+            🕒 ${order.start_time} - ${order.end_time} | <em>${order.status}</em>
+          `;
+          orderList.appendChild(div);
+        });
+
+        if (chart) chart.destroy();
+        chart = new Chart(chartCanvas, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [{
+              label: "Prep Time",
+              data: durations,
+              backgroundColor: colors
+            }]
+          },
+          options: {
+            indexAxis: "y",
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    return tooltips[ctx.dataIndex];
+                  }
+                }
+              },
+              title: {
+                display: true,
+                text: `Scheduling Algorithm: ${data.algorithm}`
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error("Error fetching orders:", err);
+        alert("Could not load orders. Is the backend running?");
+      }
+    }
+
+    fetchOrders();
+    setInterval(fetchOrders, 10000); // auto-refresh every 10 seconds
+  </script>
+</body>
+</html>
